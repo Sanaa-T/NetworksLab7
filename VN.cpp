@@ -10,7 +10,7 @@
 using namespace std;
 
 
-const char MSG_CONNECT = '1';
+const char MSG_CONNECT = 1;
 
 
 struct sockaddr_in ON_sa;
@@ -43,10 +43,37 @@ in_addr get_local_ip() {
 }
 
 
-void send_connect_msg(int tcp_fd){
-  unsigned char msg[9];
-  msg[0] = MSG_CONNECT; // msg type
+// copied from beej's guide - as it is
+int sendall(int s, char *buf, int *len)
+{
+int total = 0; // how many bytes we've sent
+int bytesleft= *len; // how many we have left to send
+int n;
+while(total < *len) {
+n = send(s, buf+total, bytesleft, 0);
+if (n == -1) { break; }
+total += n;
+bytesleft-= n;
+}
+*len = total; // return number actually sent here
+return n==-1?-1:0; // return -1 on failure, 0 on success
+}
 
+
+void send_connect_msg(int tcp_fd){
+  // msg is gonna be (ip, port) so 4 + 2 bytes
+  int len = 9;
+  char msg[len];
+  msg[0] = MSG_CONNECT; // msg type
+  msg[1] = 0; // body len 2 bytes and len is 4 + 2
+  msg[2] = 6;
+  memcpy(msg + 3, &VN_sa.sin_addr, 4); // 4 byte ip
+  memcpy(msg + 6, &VN_sa.sin_port, 2); // 2 byte port
+
+  if (sendall(tcp_fd, msg, &len) < 0) {
+    printf("kya VN banega re tu\n");
+    exit(1);
+  }
 }
 
 
@@ -79,6 +106,7 @@ int main(int argc, char *argv[]){
 
   int tcp_fd = socket(AF_INET, SOCK_STREAM, 0);
   connect(tcp_fd, (sockaddr *)&ON_sa, sizeof(ON_sa));
+  send_connect_msg(tcp_fd);
 
 
 }
