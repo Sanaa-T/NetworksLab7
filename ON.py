@@ -1,10 +1,11 @@
+from pickle import TUPLE
 import select # thank u, beej
-import socket     
-import sys     
+import socket
+import sys
 
-TCP_PORT=5000            
-MSG_CONNECT=1             
-MSG_LINK_STATE=2         
+TCP_PORT=5000
+MSG_CONNECT=1
+MSG_LINK_STATE=2
 
 HDR_SZ = 3 # 1 byte for mtype, 2 for blen
 CONN_SZ = 6 # 4 bytes for ip addr, 2 for udp port
@@ -26,25 +27,28 @@ def unpack_hdr(buf):
     return mtype, body_len
 
 def unpack_conn(body):
-    ip = socket.inet_ntoa(body[0:4]) # a.a.a.a 
+    ip = socket.inet_ntoa(body[0:4]) # a.a.a.a
     port = int.from_bytes(body[4:6], 'big')
     return ip, port
 
-def parse_config(path):
-    rows = []                                  
+def pack_tuple(letter, ip_addr, port, cost):
+  return u8(ord(letter)) + socket.inet_aton(ip_addr) + u16(port) + i32(cost)
 
-    with open(path) as f:                       
-        for line in f:   
-            line = line.strip()                 
-            rows.append([int(tok) for tok in line.split()])          
+def parse_config(path):
+    rows = []
+
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            rows.append([int(tok) for tok in line.split()])
 
     n = len(rows) + 1
 
     cost = [[-1] * n for _ in range(n)]
 
-    for i, row in enumerate(rows):              
-        for k, c in enumerate(row):             
-            j = i + 1 + k                       
+    for i, row in enumerate(rows):
+        for k, c in enumerate(row):
+            j = i + 1 + k
             cost[i][j] = c
             cost[j][i] = c
 
@@ -62,27 +66,43 @@ def print_matrix(n, cost):
             line = line + "%3d " % cost[i][j]
         print(line)
 
+
+def send_link_state(peers, cost, n, i):
+  p = peers[i]
+  body = pack_tuple(chr(65+i), p['ip'], p['udp'], 0)
+
+  for j in range(n):
+    if cost[i][j] > 0 :
+      vicino = peers[j]
+      body += pack_tuple(chr(65+j), vicino['ip'], vicino['udp'], cost[i][j])
+  p['sock'].sendall(pack_hdr(MSG_LINK_STATE, len(body)) + body)
+  print(f'ON sent link_state to {chr(65+i)} [{len(body) / TUPLE_SZ} tuples]')
+
+def broadcast_link_state(peers, cost, n):
+  for i in range(n):
+    send_link_state(peers, cost, n, i)
+
 def main():
-    if len(sys.argv) != 2 :      
+    if len(sys.argv) != 2 :
         print("wrong format!")
         sys.exit()
 
     bind_ip = '172.23.93.129' # need to decide
-    n, cost = parse_config(sys.argv[1])    
+    n, cost = parse_config(sys.argv[1])
 
     print('ON %d nodes (A..%s)' % (n, chr(64 + n)))
     print_matrix(n, cost)
 
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    listener.bind((bind_ip, TCP_PORT))      
-   
-    listener.listen(27)                        
+    listener.bind((bind_ip, TCP_PORT))
+
+    listener.listen(27)
     print('ON is listening on %s:%d' % (bind_ip, TCP_PORT))
 
     peers = []
 
-    while True:                                
+    while True:
         socks = [listener] + [p['sock'] for p in peers if p['sock']]
         readable, _, _ = select.select(socks, [], [], 1.0)
 
@@ -92,9 +112,9 @@ def main():
                 # addr is (hostaddr, port)
                 idx = len(peers)
                 peers.append({'sock': conn,
-                              'buf': b'',      
-                              'ip': None,      
-                              'udp': None,      
+                              'buf': b'',
+                              'ip': None,
+                              'udp': None,
                               'idx': idx})
                 if idx < n:
                     print('ON node %s connected from %s:%d'
@@ -102,8 +122,8 @@ def main():
                 else:
                     print('ON has extra connection from %s:%d -> island'
                           % (addr[0], addr[1]))
-                continue                        
-      
+                continue
+
             p = None
             for q in peers:
                 if q['sock'] is s:
@@ -111,26 +131,29 @@ def main():
                     break
 
             # [0,9,1,2,4,5,6]
-        
-            chunk = s.recv(4096)         
+
+            chunk = s.recv(4096)
             p['buf'] += chunk
             while len(p['buf']) >= HDR_SZ:
-                mtype, blen = unpack_hdr(p['buf']) 
+                mtype, blen = unpack_hdr(p['buf'])
                 if len(p['buf']) < HDR_SZ + blen:
-                    break                    
-                body = p['buf'][HDR_SZ:HDR_SZ + blen] 
-                p['buf'] = p['buf'][HDR_SZ + blen:]     
+                    break
+                body = p['buf'][HDR_SZ:HDR_SZ + blen]
+                p['buf'] = p['buf'][HDR_SZ + blen:]
 
                 if mtype == MSG_CONNECT and blen == CONN_SZ:
                     raw_ip, udp_port = unpack_conn(body)
-                    p['ip'] = socket.inet_ntoa(raw_ip) 
+                    p['ip'] = socket.inet_ntoa(raw_ip)
                     p['udp'] = udp_port
                     print('ON CONNECT from %s : (%s, %d)'
                           % (chr(65 + p['idx']), p['ip'], p['udp']))
                     # need to broadcast
+                    if (len(peers) >= n):
+                      broadcast_link_state(peers, cost, p['idx'])
 
 
-if __name__ == '__main__':        
+
+if __name__ == '__main__':
     try:
         main()
     except KeyboardInterrupt:
