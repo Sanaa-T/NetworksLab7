@@ -9,9 +9,24 @@
 #include <netinet/in.h>
 using namespace std;
 
+char VN_id;
 
 const char MSG_CONNECT = 1;
+const char MSG_LINK_STATE = 2;
+const int BUF_SZ = 4096;
 
+
+unsigned char buf[BUF_SZ];
+int buf_len = 0;
+
+struct vicino {
+  char id;
+  sockaddr_in sa;
+  int cost;
+};
+
+vicino vicini[26];
+int n_vicini = 0;
 
 struct sockaddr_in ON_sa;
 struct sockaddr_in VN_sa;
@@ -45,26 +60,26 @@ in_addr get_local_ip() {
 
 
 // copied from beej's guide - as it is
-int sendall(int s, char *buf, int *len)
+int sendall(int s, unsigned char *buf, int *len)
 {
-int total = 0; // how many bytes we've sent
-int bytesleft= *len; // how many we have left to send
-int n;
-while(total < *len) {
-n = send(s, buf+total, bytesleft, 0);
-if (n == -1) { break; }
-total += n;
-bytesleft-= n;
-}
-*len = total; // return number actually sent here
-return n==-1?-1:0; // return -1 on failure, 0 on success
+  int total = 0; // how many bytes we've sent
+  int bytesleft= *len; // how many we have left to send
+  int n;
+  while(total < *len) {
+    n = send(s, buf+total, bytesleft, 0);
+    if (n == -1) { break; }
+    total += n;
+    bytesleft -= n;
+  }
+  *len = total; // return number actually sent here
+  return n == -1 ? -1 : 0; // return -1 on failure, 0 on success
 }
 
 
 void send_connect_msg(int tcp_fd){
   // msg is gonna be (ip, port) so 4 + 2 bytes
   int len = 9;
-  char msg[len];
+  unsigned char msg[len];
   msg[0] = MSG_CONNECT; // msg type
   msg[1] = 0; // body len 2 bytes and len is 4 + 2
   msg[2] = 6;
@@ -75,6 +90,32 @@ void send_connect_msg(int tcp_fd){
     printf("kya VN banega re tu\n");
     exit(1);
   }
+}
+
+
+void process_link_state(unsigned char * body, int blen){
+  n_vicini = 0;
+  // 1 for letter, 4 fpr ip addr, 2 for udp port, 4 for cost
+  for (int i = 0; i + 11 <= blen; i += 11){
+    char id = body[i];
+    int cost_, cost;
+    memcpy(&cost_, body + i + 7, 4);
+    cost = ntohl(cost_);
+
+    if (cost == 0) {
+      VN_id = id;
+      continue;
+    }
+    vicino &node = vicini[n_vicini++];
+    node.id = id;
+    node.cost = cost;
+    node.sa.sin_family = AF_INET;
+    memcpy(&node.sa.sin_addr, body + i + 1, 4);
+    memcpy(&node.sa.sin_port, body + i + 5, 2);
+  }
+  printf("%c = 0", VN_id);
+  for (int i = 0; i < n_vicini; i++) printf(", %c = %d", vicini[i].id, vicini[i].cost);
+  printf("\n");
 }
 
 
@@ -108,5 +149,28 @@ int main(int argc, char *argv[]){
   int tcp_fd = socket(AF_INET, SOCK_STREAM, 0);
   connect(tcp_fd, (sockaddr *)&ON_sa, sizeof(ON_sa));
   send_connect_msg(tcp_fd);
+
+
+  while (true) {
+    int r = recv(tcp_fd, buf + buf_len, BUF_SZ - buf_len, 0);
+
+    if (r <= 0) {
+      printf("ON closed!!!!!!!!!!!!!\n");
+      break;
+    }
+
+    buf_len += r;
+
+    while (buf_len >= 3) {
+      int mtype = buf[0];
+      int blen = (buf[1] << 8) + buf[2];
+
+      if (buf_len < 3 + blen) break;
+
+      if (mtype == MSG_LINK_STATE) process_link_state(buf + 3, blen);
+      memmove(buf, buf + 3 + blen, buf_len - 3 - blen);
+      buf_len -= 3 + blen;
+    }
+  }
 
 }

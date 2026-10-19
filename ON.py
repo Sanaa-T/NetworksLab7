@@ -99,7 +99,7 @@ def main():
     for res in socket.getaddrinfo(HOST, TCP_PORT, socket.AF_INET, socket.SOCK_STREAM, 0, socket.AI_PASSIVE):
       _, _, _, _, sa = res
       bind_ip = sa[0]
-      if (bind_ip == '127.0.0.0'):
+      if (bind_ip[0:3] == '127'):
         continue
       try :
         listener.bind(sa)
