@@ -165,9 +165,7 @@ def main():
                           % (chr(65 + p['idx']), p['ip'], p['udp']))
                     # need to broadcast
                     if (len(peers) >= n):
-                      broadcast_link_state(peers, cost, n, p['idx'])
-
-
+                      broadcast_link_state(peers, cost, n)
 
 if __name__ == '__main__':
     try:

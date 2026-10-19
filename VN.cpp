@@ -39,6 +39,7 @@ in_addr get_local_ip() {
     break;
   }
   freeaddrinfo(res);
+  printf("VN using ip addr %s\n", inet_ntoa(ip));
   return ip;
 }
 
@@ -68,7 +69,7 @@ void send_connect_msg(int tcp_fd){
   msg[1] = 0; // body len 2 bytes and len is 4 + 2
   msg[2] = 6;
   memcpy(msg + 3, &VN_sa.sin_addr, 4); // 4 byte ip
-  memcpy(msg + 6, &VN_sa.sin_port, 2); // 2 byte port
+  memcpy(msg + 7, &VN_sa.sin_port, 2); // 2 byte port
 
   if (sendall(tcp_fd, msg, &len) < 0) {
     printf("kya VN banega re tu\n");
@@ -107,6 +108,5 @@ int main(int argc, char *argv[]){
   int tcp_fd = socket(AF_INET, SOCK_STREAM, 0);
   connect(tcp_fd, (sockaddr *)&ON_sa, sizeof(ON_sa));
   send_connect_msg(tcp_fd);
-
 
 }
