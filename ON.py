@@ -146,6 +146,9 @@ def main():
             # [0,9,1,2,4,5,6]
 
             chunk = s.recv(4096)
+            if chunk == 0:
+              print("what to do chunk is 0? means socket closed!")
+              continue
             p['buf'] += chunk
             while len(p['buf']) >= HDR_SZ:
                 mtype, blen = unpack_hdr(p['buf'])
