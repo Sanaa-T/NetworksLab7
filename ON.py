@@ -1,7 +1,7 @@
-from pickle import TUPLE
 import select # thank u, beej
 import socket
 import sys
+
 
 TCP_PORT=5000
 MSG_CONNECT=1
@@ -86,8 +86,7 @@ def main():
     if len(sys.argv) != 2 :
         print("wrong format!")
         sys.exit()
-
-    bind_ip = '172.23.93.129' # need to decide
+    bind_ip = '8.8.8.8' # need to decide
     n, cost = parse_config(sys.argv[1])
 
     print('ON %d nodes (A..%s)' % (n, chr(64 + n)))
@@ -95,9 +94,23 @@ def main():
 
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    listener.bind((bind_ip, TCP_PORT))
 
-    listener.listen(27)
+    HOST = socket.gethostname()
+    for res in socket.getaddrinfo(HOST, TCP_PORT, socket.AF_INET, socket.SOCK_STREAM, 0, socket.AI_PASSIVE):
+      _, _, _, _, sa = res
+      bind_ip = sa[0]
+      if (bind_ip == '127.0.0.0'):
+        continue
+      try :
+        listener.bind(sa)
+        listener.listen(27)
+      except:
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        continue
+      break
+
+
     print('ON is listening on %s:%d' % (bind_ip, TCP_PORT))
 
     peers = []
@@ -142,14 +155,14 @@ def main():
                 p['buf'] = p['buf'][HDR_SZ + blen:]
 
                 if mtype == MSG_CONNECT and blen == CONN_SZ:
-                    raw_ip, udp_port = unpack_conn(body)
-                    p['ip'] = socket.inet_ntoa(raw_ip)
+                    ip, udp_port = unpack_conn(body)
+                    p['ip'] = ip
                     p['udp'] = udp_port
                     print('ON CONNECT from %s : (%s, %d)'
                           % (chr(65 + p['idx']), p['ip'], p['udp']))
                     # need to broadcast
                     if (len(peers) >= n):
-                      broadcast_link_state(peers, cost, p['idx'])
+                      broadcast_link_state(peers, cost, n, p['idx'])
 
 
 
