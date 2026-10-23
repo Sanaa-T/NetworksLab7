@@ -38,33 +38,40 @@ lsp_rec databs[26];
 int myseqn0=0;
 int udp_fd;
 
-
+const int INF=100000;
 struct sockaddr_in ON_sa;
 struct sockaddr_in VN_sa;
+
 
 in_addr get_local_ip() {
   struct in_addr ip;
   memset(&ip, 0, sizeof(ip));
-  char host[256];
-  gethostname(host, sizeof(host));
 
-  addrinfo hints, *res;
-  memset(&hints, 0, sizeof(hints));
-  hints.ai_family = AF_INET;
-  hints.ai_socktype = SOCK_DGRAM;
-
-  if (getaddrinfo(host, NULL, &hints, &res) != 0) {
-    fprintf(stderr, "can't resolve %s\n", host);
+  int probe_fd = socket(AF_INET, SOCK_DGRAM, 0);
+  if (probe_fd < 0) {
+    perror("probe socket");
     exit(1);
   }
 
-  for (addrinfo *p = res; p != NULL; p = p->ai_next) {
-    in_addr a = ((sockaddr_in *)p->ai_addr)->sin_addr;
-    if ((ntohl(a.s_addr) >> 24) == 127) continue; // dont want no loopback
-    ip = a;
-    break;
+  struct sockaddr_in probe_sa;
+  memset(&probe_sa, 0, sizeof(probe_sa));
+  probe_sa.sin_family = AF_INET;
+  probe_sa.sin_port = htons(53);
+  inet_pton(AF_INET, "8.8.8.8", &(probe_sa.sin_addr));
+
+  // udp has no connections so nothing is actually sent
+  // kernel just picks which interface it would use
+  if (connect(probe_fd, (sockaddr *)&probe_sa, sizeof(probe_sa)) < 0) {
+    perror("cant find my own ip");
+    exit(1);
   }
-  freeaddrinfo(res);
+
+  struct sockaddr_in mine_sa;
+  socklen_t len = sizeof(mine_sa);
+  getsockname(probe_fd, (sockaddr *)&mine_sa, &len);
+  close(probe_fd);
+  ip = mine_sa.sin_addr;
+
   printf("VN using ip addr %s\n", inet_ntoa(ip));
   return ip;
 }
@@ -165,13 +172,13 @@ void sendlsp(){
   int len = build_lsp(pkt);
   flood(pkt, len, NULL);
 
-  int my=VN_id - 'A';
-  databs[my].valid = 1;
-  databs[my].seq = myseqn0;
-  databs[my].n = n_vicini;
+  int mine=VN_id - 'A';
+  databs[mine].valid = 1;
+  databs[mine].seq = myseqn0;
+  databs[mine].n = n_vicini;
   for (int i = 0; i < n_vicini; i++){
-    databs[my].entries[i].id = vicini[i].id;
-    databs[my].entries[i].cost = vicini[i].cost;
+    databs[mine].entries[i].id = vicini[i].id;
+    databs[mine].entries[i].cost = vicini[i].cost;
   }
 }
 
@@ -225,6 +232,48 @@ void print_db(){
   }
 }
 
+void dijikstra(){
+  if (VN_id==0) return;
+  int dist[26],prev[26];
+  bool visited[26];
+  for (int i=0;i<26;i++){
+    dist[i]=INF;
+    prev[i]=-1;
+    visited[i]=false;
+  }
+  int mine=VN_id-'A';
+  dist[mine]=0;
+
+  for (int i=0;i<26;i++){
+    int u=-1;
+    for (int j=0;j<26;j++){
+      if (!databs[j].valid||visited[j]) continue;
+      if (u==-1||dist[j]<dist[u]) u=j;
+    }
+    if (u==-1||dist[u]==INF) break;
+    visited[u]=true;
+
+    for (int j=0;j<databs[u].n;j++){
+      int v=databs[u].entries[j].id-'A';
+      if (v<0||v>=26) continue;
+      int v_cost=databs[u].entries[j].cost;
+      if (dist[u]+v_cost<dist[v]){
+        dist[v]=dist[u]+v_cost;
+        prev[v]=u;
+      }
+    }
+  }
+
+  printf("OUR Routing tABle IS:\n");
+  for (int i=0;i<26;i++){
+    if (!databs[i].valid||i==mine||dist[i]==INF) continue;
+    int next_hop=i;
+    while (prev[next_hop]!=mine&&prev[next_hop]!=-1) next_hop=prev[next_hop];
+    printf("%c: cost %d, next hop %c\n",'A'+i,dist[i],'A'+next_hop);
+  }
+}
+
+
 int main(int argc, char *argv[]){
   if (argc != 4) {
     printf("usage : ./VN <ip_addr of ON> <port of ON> <port of VN>\n");
@@ -241,7 +290,11 @@ int main(int argc, char *argv[]){
 
   ON_sa.sin_family =AF_INET;
   ON_sa.sin_port = htons(ON_port);
-  inet_pton(AF_INET, argv[1], &(ON_sa.sin_addr));
+  if(inet_pton(AF_INET, argv[1], &(ON_sa.sin_addr)) !=1) {
+    printf("invalid ip addresss %s\n", argv[1]);
+    exit(1);
+  }
+ 
 
   VN_sa.sin_family =AF_INET;
   VN_sa.sin_port = htons(VN_port);
@@ -249,11 +302,30 @@ int main(int argc, char *argv[]){
 
 
   udp_fd = socket(AF_INET, SOCK_DGRAM, 0);
-  bind(udp_fd, (sockaddr *)&VN_sa, sizeof(VN_sa));
+  if (udp_fd < 0) {
+    perror("udp socket");
+    exit(1);
+  }
+  if (bind(udp_fd, (sockaddr *)&VN_sa, sizeof(VN_sa)) < 0) {
+    perror("unabke to bind udp port");
+    exit(1);
+  }
   // ! handle exit stuff
 
   int tcp_fd = socket(AF_INET, SOCK_STREAM, 0);
-  connect(tcp_fd, (sockaddr *)&ON_sa, sizeof(ON_sa));
+  if (tcp_fd < 0) {
+    perror("tcp socket");
+    close(udp_fd);
+    exit(1);
+  }
+
+  if (connect(tcp_fd, (sockaddr *)&ON_sa, sizeof(ON_sa)) < 0) {
+    perror("unable to reach ON");
+    close(udp_fd);
+    close(tcp_fd);
+    exit(1);
+  }
+  
   send_connect_msg(tcp_fd);
 
   time_t last_lsp_time = time(NULL);
@@ -306,6 +378,7 @@ int main(int argc, char *argv[]){
       last_lsp_time = rightnow;
       myseqn0++;
       sendlsp();
+      dijikstra();
       print_db();
       
     }

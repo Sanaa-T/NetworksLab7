@@ -91,12 +91,18 @@ def send_link_state(peers, cost, n, i):
 def broadcast_link_state(peers, cost, n):
   for i in range(n):
     send_link_state(peers, cost, n, i)
-
+def local_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(('8.8.8.8', 53))
+        return s.getsockname()[0]
+    finally:
+        s.close()
 def main():
     if len(sys.argv) != 2 :
         print("wrong format!")
         sys.exit()
-    bind_ip = '8.8.8.8' # need to decide
+   # bind_ip = '8.8.8.8' # need to decide
     n, cost = parse_config(sys.argv[1])
     cfgtime=os.path.getmtime(sys.argv[1])
 
@@ -105,21 +111,24 @@ def main():
 
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+# HOST = socket.gethostname()
+ #   for res in socket.getaddrinfo(HOST, TCP_PORT, socket.AF_INET, socket.SOCK_STREAM, 0, socket.AI_PASSIVE):
+   #   _, _, _, _, sa = res
+  #    bind_ip = sa[0]
+    ##  if (bind_ip[0:3] == '127'):
+      #  continue
+      #try :
+      #  listener.bind(sa)
+ #       listener.listen(27)
+  ##     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    # listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+     #   continue
+ #     break
 
-    HOST = socket.gethostname()
-    for res in socket.getaddrinfo(HOST, TCP_PORT, socket.AF_INET, socket.SOCK_STREAM, 0, socket.AI_PASSIVE):
-      _, _, _, _, sa = res
-      bind_ip = sa[0]
-      if (bind_ip[0:3] == '127'):
-        continue
-      try :
-        listener.bind(sa)
-        listener.listen(27)
-      except:
-        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        continue
-      break
+
+    bind_ip = local_ip()
+    listener.bind((bind_ip, TCP_PORT))
+    listener.listen(27)
 
 
     print('ON is listening on %s:%d' % (bind_ip, TCP_PORT))
@@ -135,17 +144,20 @@ def main():
                 conn, addr = listener.accept()  # conn is the new socket for this vn
                 # addr is (hostaddr, port)
                 idx = len(peers)
-                peers.append({'sock': conn,
-                              'buf': b'',
-                              'ip': None,
-                              'udp': None,
-                              'idx': idx})
+                
                 if idx < n:
+                    peers.append({'sock': conn,
+                                    'buf': b'',
+                                                  'ip': None,
+                                                  'udp': None,
+                                                  'idx': idx})
                     print('ON node %s connected from %s:%d'
                           % (chr(65 + idx), addr[0], addr[1]))
                 else:
-                    print('ON has extra connection from %s:%d -> island'
+                    print('ON has extra connection from %s:%d -> island, and wil close'
                           % (addr[0], addr[1]))
+                    conn.close()
+                    
                 continue
 
             p = None
