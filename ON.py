@@ -134,6 +134,7 @@ def main():
     print('ON is listening on %s:%d' % (bind_ip, TCP_PORT))
 
     peers = []
+    islands = []
 
     while True:
         socks = [listener] + [p['sock'] for p in peers if p['sock']]
@@ -144,7 +145,7 @@ def main():
                 conn, addr = listener.accept()  # conn is the new socket for this vn
                 # addr is (hostaddr, port)
                 idx = len(peers)
-                
+
                 if idx < n:
                     peers.append({'sock': conn,
                                     'buf': b'',
@@ -154,10 +155,11 @@ def main():
                     print('ON node %s connected from %s:%d'
                           % (chr(65 + idx), addr[0], addr[1]))
                 else:
-                    print('ON has extra connection from %s:%d -> island, and wil close'
+                  # why closing this connection? lets js make diff list for it
+                    print('ON has extra connection from %s:%d -> island'
                           % (addr[0], addr[1]))
-                    conn.close()
-                    
+                    islands.append(conn)
+
                 continue
 
             p = None
