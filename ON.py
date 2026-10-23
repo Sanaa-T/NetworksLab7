@@ -1,6 +1,7 @@
 import select # thank u, beej
 import socket
 import sys
+import os
 
 
 TCP_PORT=5000
@@ -40,6 +41,8 @@ def parse_config(path):
     with open(path) as f:
         for line in f:
             line = line.strip()
+            if not line or line.startswith('#'):
+                continue
             rows.append([int(tok) for tok in line.split()])
 
     n = len(rows) + 1
@@ -66,6 +69,13 @@ def print_matrix(n, cost):
             line = line + "%3d " % cost[i][j]
         print(line)
 
+def ready(peers, n):
+  if len(peers) < n:
+    return False
+  for i in range(n):
+    if peers[i]['ip'] is None or peers[i]['sock'] is None:
+      return False
+  return True
 
 def send_link_state(peers, cost, n, i):
   p = peers[i]
@@ -88,6 +98,7 @@ def main():
         sys.exit()
     bind_ip = '8.8.8.8' # need to decide
     n, cost = parse_config(sys.argv[1])
+    cfgtime=os.path.getmtime(sys.argv[1])
 
     print('ON %d nodes (A..%s)' % (n, chr(64 + n)))
     print_matrix(n, cost)
@@ -146,8 +157,11 @@ def main():
             # [0,9,1,2,4,5,6]
 
             chunk = s.recv(4096)
-            if chunk == 0:
+            if not chunk:
               print("what to do chunk is 0? means socket closed!")
+              print('node %s disconnected' % chr(65 + p['idx']))
+              s.close()
+              p['sock'] = None
               continue
             p['buf'] += chunk
             while len(p['buf']) >= HDR_SZ:
@@ -164,8 +178,17 @@ def main():
                     print('ON CONNECT from %s : (%s, %d)'
                           % (chr(65 + p['idx']), p['ip'], p['udp']))
                     # need to broadcast
-                    if (len(peers) >= n):
+                    if ready(peers, n):
                       broadcast_link_state(peers, cost, n)
+        m=os.path.getmtime(sys.argv[1])
+        if m!=cfgtime:
+            print("config file changed, reloading...")
+            n, cost = parse_config(sys.argv[1])
+            cfgtime=m
+            print('ON %d nodes (A..%s)' % (n, chr(64 + n)))
+            print_matrix(n, cost)
+            if ready(peers, n):
+              broadcast_link_state(peers, cost, n)
 
 if __name__ == '__main__':
     try:
